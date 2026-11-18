@@ -16,22 +16,71 @@ log = logging.getLogger("lead-monitor")
 
 app = Flask(__name__)
 DB_PATH = os.getenv("DB_PATH", "seen.sqlite3")
+MAX_BUDGET_RUB = int(os.getenv("MAX_BUDGET_RUB", "3000"))
 
-# Russian-language intent phrases. This is a first-pass filter, not an AI guarantee.
+# Russian requests for website development. Intentionally accepts varied wording.
 INTENT = re.compile(
-    r"(нужен|нужна|нужно|ищу|посоветуйте|подскажите|кто может|"
-    r"заказать|требуется|хочу сделать|планирую)\b.{0,100}\b"
-    r"(сайт|лендинг|сайт-визитк|интернет-магазин|веб-разработчик|разработчик сайта)|"
-    r"(сайт|лендинг|сайт-визитк|интернет-магазин).{0,100}\b"
-    r"(под ключ|для бизнеса|с нуля|разработать|создать|сделать)",
+    r"(нужен|нужна|нужно|ищу|посоветуйте|подскажите|кто может|кто-нибудь может|"
+    r"кто сделает|кто разработает|заказать|требуется|хочу сделать|планирую|"
+    r"ищем исполнителя|нужен исполнитель|ищу специалиста).{0,140}"
+    r"(сайт|лендинг|сайт-визитк|интернет-магазин|веб-разработчик|разработчик сайта|"
+    r"создание сайта|разработка сайта)|"
+    r"(сайт|лендинг|сайт-визитк|интернет-магазин).{0,120}"
+    r"(под ключ|для бизнеса|с нуля|разработать|создать|сделать|заказать|нужен|нужна)",
     re.IGNORECASE | re.DOTALL,
 )
 NOISE = re.compile(
     r"(ищем сотрудников|вакансия|резюме|портфолио разработчика|"
     r"предлагаю услуги|оказываю услуги|наши услуги|скидка|акция|"
-    r"продам курс|обучение разработке)",
+    r"продам курс|обучение разработке|ищу работу|ищу подработку)",
     re.IGNORECASE,
 )
+
+# Amounts are considered budget figures only when accompanied by a currency marker
+# or located near words that indicate payment/budget.
+AMOUNT_RE = re.compile(
+    r"(?<!\w)(\d{1,3}(?:[ .]\d{3})+|\d{1,6})(?:\s*(тыс(?:яч)?|т\.р\.|к))?"
+    r"\s*(₽|руб(?:лей|ля|ль)?|р\.?)?",
+    re.IGNORECASE,
+)
+BUDGET_CONTEXT = re.compile(
+    r"(бюджет|оплат[аы]|стоимост[ьи]|цен[ауы]|заплатить|за работу|"
+    r"за сайт|за лендинг|готов[аы] заплатить|вознаграждение|гонорар)",
+    re.IGNORECASE,
+)
+WORD_AMOUNTS = {
+    "тысяча": 1000, "тысячи": 1000, "тысяч": 1000,
+    "две тысячи": 2000, "двух тысяч": 2000,
+    "три тысячи": 3000, "трех тысяч": 3000, "трёх тысяч": 3000,
+    "четыре тысячи": 4000, "четырех тысяч": 4000, "четырёх тысяч": 4000,
+    "пять тысяч": 5000, "шесть тысяч": 6000, "семь тысяч": 7000,
+    "десять тысяч": 10000,
+}
+
+def extract_budget_amounts(message: str):
+    amounts = []
+    for match in AMOUNT_RE.finditer(message):
+        raw_number, multiplier, currency = match.groups()
+        before = message[max(0, match.start() - 55):match.start()]
+        after = message[match.end():min(len(message), match.end() + 25)]
+        if not (currency or multiplier or BUDGET_CONTEXT.search(before) or BUDGET_CONTEXT.search(after)):
+            continue
+        number = int(re.sub(r"[ .]", "", raw_number))
+        if multiplier:
+            number *= 1000
+        amounts.append(number)
+
+    lower = message.lower()
+    for phrase, value in WORD_AMOUNTS.items():
+        if phrase in lower and BUDGET_CONTEXT.search(lower):
+            amounts.append(value)
+    return amounts
+
+def budget_is_acceptable(message: str) -> bool:
+    amounts = extract_budget_amounts(message)
+    # No stated budget: keep the lead rather than miss a potential client.
+    # For ranges, checking the maximum value avoids sending budgets above the cap.
+    return not amounts or max(amounts) <= MAX_BUDGET_RUB
 
 def db_init():
     with sqlite3.connect(DB_PATH) as con:
@@ -66,7 +115,8 @@ async def run_monitor():
 
     client = TelegramClient(StringSession(session), api_id, api_hash)
     await client.start()
-    log.info("Monitoring configured sources: %s", ", ".join("@" + s for s in sources))
+    log.info("Monitoring configured sources: %s; max budget: %s RUB",
+             ", ".join("@" + s for s in sources), MAX_BUDGET_RUB)
 
     @client.on(events.NewMessage(chats=sources))
     async def on_message(event):
@@ -74,6 +124,10 @@ async def run_monitor():
             message = event.raw_text or ""
             if len(message.strip()) < 15 or not INTENT.search(message) or NOISE.search(message):
                 return
+            if not budget_is_acceptable(message):
+                log.info("Lead skipped: stated budget exceeds %s RUB", MAX_BUDGET_RUB)
+                return
+
             chat = await event.get_chat()
             username = getattr(chat, "username", None)
             chat_title = getattr(chat, "title", None) or "Telegram"
@@ -81,9 +135,16 @@ async def run_monitor():
             key = f"{username or chat_title}:{msg_id}"
             if already_seen(key):
                 return
+
             link = f"https://t.me/{username}/{msg_id}" if username else ""
             excerpt = message[:1800]
-            alert = f"🔎 Возможная заявка на сайт\nИсточник: {chat_title}"
+            amounts = extract_budget_amounts(message)
+            budget_label = f"до {MAX_BUDGET_RUB} ₽" if not amounts else f"указано: {max(amounts)} ₽"
+            alert = (
+                f"🔎 Возможная заявка на разработку сайта\n"
+                f"Бюджет: {budget_label}\n"
+                f"Источник: {chat_title}"
+            )
             if link:
                 alert += f"\nСсылка: {link}"
             alert += f"\n\n{excerpt}"
