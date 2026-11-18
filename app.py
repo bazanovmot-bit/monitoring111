@@ -39,7 +39,7 @@ NOISE = re.compile(
 # Amounts are considered budget figures only when accompanied by a currency marker
 # or located near words that indicate payment/budget.
 AMOUNT_RE = re.compile(
-    r"(?<!\w)(\d{1,3}(?:[ .]\d{3})+|\d{1,6})(?:\s*(тысяч(?:а|и)?|т\.р\.|к))?"
+    r"(?<!\w)(\d{1,3}(?:[ .]\d{3})+|\d{1,6})(?:\s*(тыс(?:яч(?:а|и)?)?|т\.р\.|к))?"
     r"\s*(₽|руб(?:лей|ля|ль)?|р\.?)?",
     re.IGNORECASE,
 )
