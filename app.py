@@ -110,7 +110,7 @@ async def run_monitor():
     api_hash = os.environ["TELEGRAM_API_HASH"]
     session = os.environ["TELEGRAM_SESSION_STRING"]
     default_sources = "slavelancers,onlain_biznes_rabota,profi_pr"
-    configured_sources = os.getenv("SOURCES", default_sources)
+    configured_sources = os.getenv("SOURCES") or default_sources
     sources = [s.strip().lstrip("@") for s in configured_sources.split(",") if s.strip()]
     if not sources:
         raise RuntimeError("Set SOURCES to comma-separated public channel/group usernames")
