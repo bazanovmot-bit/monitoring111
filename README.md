@@ -17,7 +17,7 @@ Set these in Render → your service → Environment:
 - `TELEGRAM_SESSION_STRING`: generate locally with Telethon StringSession while signed into your own Telegram account. Do not send it to anyone.
 - `BOT_TOKEN`: token from @BotFather. Keep it secret.
 - `CHAT_ID`: your private chat ID with the bot. Open the bot and press Start first.
-- `SOURCES`: comma-separated public channel/group usernames, without @, e.g. `public_channel,another_group`.
+- `SOURCES`: optional comma-separated public channel/group usernames, without @. If left unset, the app uses `slavelancers,onlain_biznes_rabota,profi_pr`.
 - `MAX_BUDGET_RUB`: optional maximum budget in rubles; defaults to `3000`. Messages with no stated budget are kept; messages with an explicitly detected amount above the limit are skipped.
 
 ## Lead filters
