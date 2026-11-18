@@ -83,10 +83,10 @@ async def run_monitor():
                 return
             link = f"https://t.me/{username}/{msg_id}" if username else ""
             excerpt = message[:1800]
-            alert = f"🔎 Возможная заявка на сайт\\nИсточник: {chat_title}"
+            alert = f"🔎 Возможная заявка на сайт\nИсточник: {chat_title}"
             if link:
-                alert += f"\\nСсылка: {link}"
-            alert += f"\\n\\n{excerpt}"
+                alert += f"\nСсылка: {link}"
+            alert += f"\n\n{excerpt}"
             await asyncio.to_thread(send_alert, alert)
             log.info("Lead alert sent for %s", key)
         except Exception:
